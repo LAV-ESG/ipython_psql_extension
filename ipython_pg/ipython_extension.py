@@ -35,6 +35,33 @@ from IPython.core.magic import (Magics, line_magic, line_cell_magic,
 from IPython.display import HTML
 import psycopg2
 
+SQL_SCHEMAS = ("select nspname as name, "
+               "coalesce(pg_catalog.obj_description(oid), '(no description)')"
+               " as schema_description "
+               "from pg_catalog.pg_namespace "
+               "where nspname !~ 'pg_(temp|toast|catalog).*' "
+               "and nspname != 'information_schema'")
+
+SQL_TABLES = ("SELECT c.relname as table_name, "
+              "coalesce(pg_catalog.obj_description(c.oid), '(no description)')"
+              " as table_description "
+              "FROM pg_catalog.pg_class as c "
+              "LEFT JOIN pg_namespace n ON n.oid = c.relnamespace "
+              "WHERE n.nspname = '{}' and c.relkind in ('r', 'v')")
+
+SQL_COLUMNS = ("select column_name as name,"
+               "case when precision > 0 then "
+               "(udt_name || '(' || precision || ')') "
+               "else (udt_name || '()') end as type, "
+               "pg_catalog.col_description(foo.oid, foo.ordinal_position) "
+               "as description from ("
+               "select udt_catalog, udt_name, ordinal_position, column_name, "
+               "coalesce(character_maximum_length, numeric_precision, "
+               "datetime_precision, 0) as precision, "
+               "table_name, ("
+               "select ('\"' || table_schema || '\".\"' || table_name || '\"'"
+               ")::regclass::oid) as oid from information_schema.columns "
+               "where table_schema = '{}' and table_name='{}') as foo;")
 
 @magics_class
 class pgMagics(Magics):
@@ -321,3 +348,29 @@ class pgMagics(Magics):
         html.append("</table>")
         return HTML("".join(html))
 
+    @line_magic
+    def pg_info(self, obj):
+        """Retrieve meta-information on database contents.
+
+        Usage:
+            %pg_info [<name>]
+
+        If used without arguments, returns the names of all schemas in the
+        databse. If <name> is a schema name, returns the names of all tables
+        in that schema. And if <name> is a table name (needs to be prefixed
+        with the schema if not on the search path), returns all columns in
+        that table. """
+        obj = str(obj).replace('"', '').replace("'", r"\'")
+        if not obj:
+            sql = SQL_SCHEMAS
+        elif "." in obj:
+            obj = obj.split(".")
+            sql = SQL_COLUMNS.format(obj[0], obj[1])
+        else:
+            sql = SQL_TABLES.format(obj)
+
+        with self.catch_errors():
+            cur = self.pg_cursor()
+            cur.execute(sql)
+
+        return self.display_cur_as_table(cur)
