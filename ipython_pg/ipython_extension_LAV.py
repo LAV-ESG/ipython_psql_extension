@@ -1,4 +1,4 @@
-from ipython_extension import pgMagics
+from .ipython_extension import pgMagics
 import os
 
 
