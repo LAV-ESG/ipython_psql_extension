@@ -11,5 +11,8 @@ Next to IPython "magics" targeting ease of use, the package also includes:
 ## Demo
 We showcase the extension's features in the [demo notebook](https://github.com/LAV-ESG/ipython_psql_extension/blob/master/IPYpsqglDemo.ipynb).
 
-## Download
-Go to the [latest release](https://github.com/LAV-ESG/ipython_psql_extension/releases/latest).
+## Installation
+0. Make sure you have: *IPython* and *psycopg2* installed. The *PostGIS* integration requires *Shapely*. For this installation instructions to work, you need *pip* installed (use ``python -m pip`` instead of ``pip`` if it's not on the system path).
+1. Download the ``.whl`` file of the [latest release](https://github.com/LAV-ESG/ipython_psql_extension/releases/latest)
+2. In a console, change to where you downloaded the file and
+3. Run:``pip install [name of the file]``
