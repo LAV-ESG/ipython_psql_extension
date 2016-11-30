@@ -34,6 +34,7 @@ from IPython.core.magic import (Magics, line_magic, line_cell_magic,
                                 magics_class)
 from IPython.display import HTML
 import psycopg2
+import psycopg2.extensions
 
 SQL_SCHEMAS = ("select nspname as name, "
                "coalesce(pg_catalog.obj_description(oid), '(no description)')"
@@ -167,7 +168,7 @@ class pgMagics(Magics):
 
     @line_magic
     def pg_rollback(self, arg):
-        """ Resets the connection object after an error """
+        """Reset the connection object after an error."""
         self._dbconn().rollback()
 
     @line_magic
@@ -177,11 +178,12 @@ class pgMagics(Magics):
 
     @line_magic
     def pg_cursor(self, arg=None):
-        """ Return a new cursor object, for more direct access """
+        """Return a new cursor object, for more direct access."""
         return self._dbconn().cursor()
 
     @contextmanager
     def catch_errors(self):
+        """General purpose context manager for database access."""
         try:
             yield
         except Exception as e:
@@ -200,9 +202,12 @@ class pgMagics(Magics):
             self.shell.write("SUCCES: matched {} rows\n".format(cur.rowcount))
 
     def query(self, sql):
+        """Query the database and perform variable substitution."""
         if "${" in sql:
             sql = string.Template(sql)
             lcs = get_ipython().ev("locals()")
+            lcs = {k: str(psycopg2.extensions.adpat(v))
+                   for k, v in lcs.items()}
             sql = sql.substitute(**lcs)
 
         with self.catch_errors():
@@ -211,9 +216,10 @@ class pgMagics(Magics):
             self.cur_report(cur)
         return cur
 
+
     @line_cell_magic
     def pg_sql(self, line, cell=None):
-        """ Query the database.
+        """Query the database.
 
         Executes an SQL query against the open database connection and provides
         access to the results. It can be be used both as a cell and line magic.
@@ -233,7 +239,7 @@ class pgMagics(Magics):
         results are returned as an HTML table in a IPthon.display.HTML
         instance. Note that, in order not to destabilize the browser, only the
         first 500 rows are displayed. If however <varname> is specified, then
-        no output is provided, but instead the cursor used to query the database
+        no output is provided, but instead the cursor that queried the database
         is made available as a local variable of name <varname>.
 
         Within <sql>, the values of variables declared within the IPython
@@ -247,22 +253,19 @@ class pgMagics(Magics):
 
             In [3]: %pg_sql select * from tbl where id = 2
         """
-        if cell is None:
-            output = None
-            query = str(line)
-        else:
-            output = str(line)
-            query = str(cell)
-
+        query, output = _line_cell_prep(line, cell)
         cur = self.query(query)
 
-        if output is None or len(output.strip()) == 0:
-            if cell is None:
-                return cur
-            return self.display_cur_as_table(cur)
+        if output:
+            self.shell.write(" cursor object as '{}'\n".format(output))
+            self.shell.push({output: cur})
+            return
 
-        self.shell.write(" cursor object as '{}'\n".format(output))
-        self.shell.push({output: cur})
+        if cell is None:
+            return cur
+
+        return self.display_cur_as_table(cur)
+
 
     @line_magic
     def pg_first(self, sql):
@@ -295,13 +298,7 @@ class pgMagics(Magics):
         Contrary to $pg_sql, thre is no HTML output though (but variable
         substitution works).
         """
-        if cell is None:
-            output = None
-            query = str(line.strip())
-        else:
-            output = str(line.strip())
-            query = str(cell.strip())
-
+        query, output = _line_cell_prep(line, cell)
         row = self.pg_first(query)
         if row is not None:
             row = row[0] if len(row) == 1 else row
@@ -311,9 +308,57 @@ class pgMagics(Magics):
             self.shell.write(" result stored under '{}'\n".format(output))
         return row
 
-    def display_cur_as_table(self, cur, row_limit=500):
-        """ Displays the results in the given cursor object as HTML table """
+    @line_cell_magic
+    def pg_tuple(self, line, cell=None):
+        """Return each column as a tuple.
 
+        Line magic usage:
+            [<var1>[, <var2>]... = ] %pg_tuple <sql>
+
+        Cell magic usage:
+            %%pg_tuple [<var1>[, <var2>]...]
+            <sql>
+
+        This magic returns a tuple of tuples, where each tuple corresponds
+        to the data of a column of the result table. If just one output
+        variable ("<var1>") is specified, the tuple of tuples will be availabe
+        there. If multiple <var> are specified (as many as there are columns),
+        the tuple of tuple will be expanded onto them.
+        """
+        query, args = _line_cell_prep(line, cell)
+        args = re.split(", *", args) if args else []
+        cur = self.query(query)
+
+        if not args:
+            return tuple(zip(*cur))
+
+        if len(args) == 1:
+            self.shell.push({args[0]: tuple(zip(*cur))})
+            self.shell.write(" result stored under '{}'\n".format(args[0]))
+            return
+
+        if len(args) < len(cur.description):
+            raise ValueError("too many values to unpack (expected {})"
+                             .format(len(args)))
+        if len(args) > len(cur.description):
+            raise ValueError("too few values to unpack (expected {})"
+                             .format(len(args)))
+
+        for arg, values in zip(args, zip(*cur)):
+            self.shell.push({arg: tuple(values)})
+        output = ", ".join("'{}'".format(s) for s in args)
+        self.shell.write(" results stored under \n".format(output))
+
+    def display_cur_as_table(self, cur, row_limit=500):
+        """Display the results in the given cursor object as HTML table.
+
+        Arguments:
+            cur {cursor} -- results to be displayed
+            row_limit {int} -- number of rows to display (default: 500)
+
+        Returns:
+            IPython.display.HTML -- HTML table representation
+        """
         if cur.rowcount < 1:
             return  # no results to display
 
@@ -374,3 +419,16 @@ class pgMagics(Magics):
             cur.execute(sql)
 
         return self.display_cur_as_table(cur)
+
+
+def _line_cell_prep(line, cell=None):
+    """Default logic for line-cell magis."""
+    if cell is None:
+        args = None
+        query = str(line)
+    else:
+        args = str(line).strip()
+        args = None if len(args) == 0 else args
+        query = str(cell)
+
+    return (query, args)
