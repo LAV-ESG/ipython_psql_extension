@@ -65,7 +65,7 @@ def cast_hexwkb(value, cur):
 def adapt_shapely(value):
     """Convert a shapely object to PostGIS hex-wkb."""
     wkb = shapely.wkb.dumps(value, hex=True)
-    return psycopg2.extensions.adapt(wkb).getquoted()
+    return psycopg2.extensions.AsIs(psycopg2.extensions.adapt(wkb))
 
 
 def register_postgis2shapely():
