@@ -206,8 +206,15 @@ class pgMagics(Magics):
         if "${" in sql:
             sql = string.Template(sql)
             lcs = get_ipython().ev("locals()")
-            lcs = {k: str(psycopg2.extensions.adpat(v))
-                   for k, v in lcs.items()}
+
+            def _adapt(v):
+                try:
+                    return psycopg2.extensions.adapt(v)
+                except Exception:
+                    return None
+
+            lcs = ((k, _adapt(v)) for k, v in lcs.items())
+            lcs = dict((k, v) for k, v in lcs if v is not None)
             sql = sql.substitute(**lcs)
 
         with self.catch_errors():
