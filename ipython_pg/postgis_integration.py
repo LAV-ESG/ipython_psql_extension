@@ -70,9 +70,9 @@ def adapt_shapely(value):
 
 def register_postgis2shapely():
     """Register 'cast_hexwkb' to transparently convert results from queries."""
-    typ = psycopg2.extensions.new_type((20648,), "GEOGRAPHY", cast_hexwkb)
+    typ = psycopg2.extensions.new_type((180021,), "GEOGRAPHY", cast_hexwkb)
     psycopg2.extensions.register_type(typ)
-    typ = psycopg2.extensions.new_type((20094,), "GEOMETRY", cast_hexwkb)
+    typ = psycopg2.extensions.new_type((179401,), "GEOMETRY", cast_hexwkb)
     psycopg2.extensions.register_type(typ)
 
 
