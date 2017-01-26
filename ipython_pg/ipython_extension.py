@@ -68,7 +68,8 @@ SQL_COLUMNS = ("select column_name as name,"
 class pgMagics(Magics):
 
     def __init__(self, shell, default_host="localhost", default_port=5432,
-                 default_sslcert=None, default_user=None, auto_commit=True):
+                 default_sslcert=None, default_user=None, auto_commit=True,
+                 disable_postgis_integration=False, disable_green_mode=False):
         """Create a new pgMagic instance.
 
         Arguments:
@@ -95,7 +96,9 @@ class pgMagics(Magics):
                                 else str(default_sslcert))
         self.default_user = (None if default_user is None
                              else str(default_user))
-        self.auto_commit=bool(auto_commit)
+        self.auto_commit = bool(auto_commit)
+        self.postgis_integration = not bool(disable_postgis_integration)
+        self.green_mode = not bool(disable_green_mode)
 
     @line_magic
     def pg_connect(self, arg):
@@ -109,6 +112,10 @@ class pgMagics(Magics):
         Example:
            %pg_connect host='localhost' user='root' dbname='postgres'
         """
+
+        if self.green_mode:
+            from . import green_mode
+            green_mode.activate()
 
         try:
             args = re.split(" +", arg)
@@ -153,6 +160,12 @@ class pgMagics(Magics):
             return
 
         self.shell.write("SUCCESS: connected to {}".format(args["host"]))
+
+        if self.postgis_integration:
+            from . import postgis_integration
+            if postgis_integration.activate_if_postgis_installed(self.dbconn):
+                self.shell.write("  PostGIS integration enabled")
+
 
     @line_magic
     def pg_disconnect(self, arg):

@@ -11,9 +11,11 @@
     """
 
 import psycopg2.extensions
+import psycopg2
 import shapely.wkb
 from shapely.geometry.base import BaseGeometry
 import re
+import warnings
 
 
 class PostGISnotInstalled(Exception):
@@ -68,12 +70,39 @@ def adapt_shapely(value):
     return psycopg2.extensions.AsIs(psycopg2.extensions.adapt(wkb))
 
 
-def register_postgis2shapely():
+def register_postgis2shapely(conn):
     """Register 'cast_hexwkb' to transparently convert results from queries."""
-    typ = psycopg2.extensions.new_type((180021,), "GEOGRAPHY", cast_hexwkb)
-    psycopg2.extensions.register_type(typ)
-    typ = psycopg2.extensions.new_type((179401,), "GEOMETRY", cast_hexwkb)
-    psycopg2.extensions.register_type(typ)
+    for t_name in ("GEOGRAPHY", "GEOMETRY"):
+        t_code = get_type_code(t_name, conn)
+        typ = psycopg2.extensions.new_type((t_code,), t_name, cast_hexwkb)
+        psycopg2.extensions.register_type(typ)
+
+
+def get_type_code(type, conn):
+    """Get typecopde from database."""
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT NULL::{}".format(str(type)))
+        code = cur.description[0].type_code
+    except psycopg2.ProgrammingError as e:
+        conn.rollback()
+        if e.pgcode == 42704:  # re-raise if it's not what we expected
+            raise PostGISnotInstalled
+        raise e
+    finally:
+        cur.close()
+    return code
+
+
+def get_type_object(name):
+    """Get registered type by name."""
+    try:
+        return next(s for s in psycopg2.extensions.string_types.values()
+                    if s.name == name)
+    except StopIteration:
+        raise KeyError(name)
+
+
 
 
 def register_shapely2postgis():
@@ -81,10 +110,7 @@ def register_shapely2postgis():
     psycopg2.extensions.register_adapter(BaseGeometry, adapt_shapely)
 
 
-def activate():
+def activate(conn=None):
     """Register postgis -> shapely and back."""
-    register_postgis2shapely()
+    register_postgis2shapely(conn)
     register_shapely2postgis()
-
-
-
