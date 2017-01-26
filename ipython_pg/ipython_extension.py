@@ -163,8 +163,11 @@ class pgMagics(Magics):
 
         if self.postgis_integration:
             from . import postgis_integration
-            if postgis_integration.activate_if_postgis_installed(self.dbconn):
-                self.shell.write("  PostGIS integration enabled")
+            try:
+                postgis_integration.activate(conn=self.dbconn)
+                self.shell.write("\n  PostGIS integration enabled")
+            except postgis_integration.PostGISnotInstalled:
+                pass
 
 
     @line_magic

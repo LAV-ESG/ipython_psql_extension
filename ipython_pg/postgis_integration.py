@@ -86,7 +86,7 @@ def get_type_code(type, conn):
         code = cur.description[0].type_code
     except psycopg2.ProgrammingError as e:
         conn.rollback()
-        if e.pgcode == 42704:  # re-raise if it's not what we expected
+        if str(e.pgcode) == "42704":  # re-raise if it's not what we expected
             raise PostGISnotInstalled
         raise e
     finally:
@@ -101,8 +101,6 @@ def get_type_object(name):
                     if s.name == name)
     except StopIteration:
         raise KeyError(name)
-
-
 
 
 def register_shapely2postgis():
