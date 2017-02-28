@@ -162,13 +162,21 @@ class pgMagics(Magics):
         self.shell.write("SUCCESS: connected to {}".format(args["host"]))
 
         if self.postgis_integration:
-            from . import postgis_integration
             try:
-                postgis_integration.activate(conn=self.dbconn)
-                self.shell.write("\n  PostGIS integration enabled")
-            except postgis_integration.PostGISnotInstalled:
-                pass
-
+                from . import postgis_integration
+            except ImportError:
+                self.shell.write("WARNING: The PostGIS extension has been "
+                                 "disabled, because 'shapely' is not "
+                                 "installed. You only need this if you work "
+                                 "with geo-spatial information. You can "
+                                 "suppress this error message by "
+                                 "disabling the postgis extension.")
+            else:
+                try:
+                    postgis_integration.activate(conn=self.dbconn)
+                    self.shell.write("\n  PostGIS integration enabled")
+                except postgis_integration.PostGISnotInstalled:
+                    pass
 
     @line_magic
     def pg_disconnect(self, arg):
