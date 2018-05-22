@@ -1,4 +1,6 @@
 # An IPython extension for Postgres through Psycopg2
+**Download [latest release](https://github.com/LAV-ESG/ipython_psql_extension/releases/latest)**
+
 This IPython extension is a small wrapper around [psycopg2](http://initd.org/psycopg/), to make data-anaylsis between SQL and the Jupyter Notebook more fuild.
 The module was written at the [Energy Systems Group of ETHZ-LAV](http://www.lav.ethz.ch/research/energy-systems-group.html), where we use Postgres as our central data repository.
 
