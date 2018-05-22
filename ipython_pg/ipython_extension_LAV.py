@@ -7,7 +7,7 @@ def load_ipython_extension(ipython):
     # instance, which can be used in any way. This allows you to register
     # new magics or aliases, for example.
     magics = pgMagics(ipython,
-                      default_host="lav-fileserver",
+                      default_host="lav-fileserver.ethz.ch",
                       default_port=5433,
                       default_sslcert=os.path.join(os.path.expanduser("~"),
                                                    "subnetz.org.crt"),

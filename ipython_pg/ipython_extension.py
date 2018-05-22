@@ -30,11 +30,13 @@
 from contextlib import contextmanager
 import string
 import re
+import getpass
 from IPython.core.magic import (Magics, line_magic, line_cell_magic,
                                 magics_class)
 from IPython.display import HTML
 import psycopg2
 import psycopg2.extensions
+import pandas as pd
 
 SQL_SCHEMAS = ("select nspname as name, "
                "coalesce(pg_catalog.obj_description(oid), '(no description)')"
@@ -135,13 +137,6 @@ class pgMagics(Magics):
         args.setdefault("port", self.default_port)
         args.setdefault("host", self.default_host)
 
-        if "password" not in args:
-            import getpass
-            args["password"] = getpass.getpass("password for {}@{}:{}:"
-                                               .format(args["user"],
-                                                       args["host"],
-                                                       args["port"]))
-
         if "dbname" not in args:
             args["dbname"] = input("dbname:")
 
@@ -151,13 +146,27 @@ class pgMagics(Magics):
         dsn = ("{}='{}'".format(*a) for a in args.items())
         dsn = " ".join(dsn)
 
+        # quick fiX:
         try:
-
             self.dbconn = psycopg2.connect(dsn)
         except psycopg2.OperationalError as e:
-            self.shell.write_err("ERROR: unable to connect! Got {}"
-                                 .format(str(e)))
-            return
+            if "password" in args:
+                self.shell.write_err("ERROR: unable to connect! Got {}"
+                                     .format(str(e)))
+                return
+
+            args["password"] = getpass.getpass("password for {}@{}:{}:"
+                                               .format(args["user"],
+                                                       args["host"],
+                                                       args["port"]))
+            dsn = ("{}='{}'".format(*a) for a in args.items())
+            dsn = " ".join(dsn)
+            try:
+                self.dbconn = psycopg2.connect(dsn)
+            except psycopg2.OperationalError as e:
+                self.shell.write_err("ERROR: unable to connect! Got {}"
+                                     .format(str(e)))
+                return
 
         self.shell.write("SUCCESS: connected to {}".format(args["host"]))
 
@@ -204,6 +213,11 @@ class pgMagics(Magics):
     def pg_cursor(self, arg=None):
         """Return a new cursor object, for more direct access."""
         return self._dbconn().cursor()
+
+    @line_magic
+    def pg_connection(self, arg=None):
+        """Return psycopg2 connection object."""
+        return self._dbconn()
 
     @contextmanager
     def catch_errors(self):
@@ -297,6 +311,26 @@ class pgMagics(Magics):
 
         return self.display_cur_as_table(cur)
 
+
+    @line_cell_magic
+    def pg_pd(self, line, cell=None):
+        """Query the database.
+
+        Executes an SQL query against the open database connection and returns
+        the results as pandas dataframe.
+        """
+        query, output = _line_cell_prep(line, cell)
+        cur = self.query(query)
+        dta = pd.DataFrame([r for r in cur],
+                           columns=[c.name for c in cur.description])
+        cur.close()
+
+        if output:
+            self.shell.write(" results stored as '{}'\n".format(output))
+            self.shell.push({output: dta})
+            return
+
+        return dta
 
     @line_magic
     def pg_first(self, sql):
