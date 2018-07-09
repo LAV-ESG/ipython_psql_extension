@@ -37,6 +37,7 @@ from IPython.display import HTML
 import psycopg2
 import psycopg2.extensions
 import pandas as pd
+import argparse
 
 SQL_SCHEMAS = ("select nspname as name, "
                "coalesce(pg_catalog.obj_description(oid), '(no description)')"
@@ -101,6 +102,7 @@ class pgMagics(Magics):
         self.auto_commit = bool(auto_commit)
         self.postgis_integration = not bool(disable_postgis_integration)
         self.green_mode = not bool(disable_green_mode)
+        self._geo_types = []
 
     @line_magic
     def pg_connect(self, arg):
@@ -184,6 +186,7 @@ class pgMagics(Magics):
                 try:
                     postgis_integration.activate(conn=self.dbconn)
                     self.shell.write("\n  PostGIS integration enabled")
+                    self._geo_types = list(postgis_integration.geo_types())
                 except postgis_integration.PostGISnotInstalled:
                     pass
 
@@ -313,25 +316,79 @@ class pgMagics(Magics):
         return self.display_cur_as_table(cur)
 
 
+    def _get_as_pandas(self, query, index=None):
+        cur = self.query(query)
+        dta = pd.DataFrame([r for r in cur],
+                           columns=[c.name for c in cur.description])
+        geocols = [c.name for c in cur.description
+                   if c.type_code in self._geo_types]
+        cur.close()
+
+        if index:
+            dta.set_index(index, inplace=True)
+
+        return dta, geocols
+
+
     @line_cell_magic
     def pg_pd(self, line, cell=None):
         """Query the database.
 
         Executes an SQL query against the open database connection and returns
-        the results as pandas dataframe.
-        """
-        query, output = _line_cell_prep(line, cell)
-        cur = self.query(query)
-        dta = pd.DataFrame([r for r in cur],
-                           columns=[c.name for c in cur.description])
-        cur.close()
+        the results as pandas dataframe. If the PostGIS extension is enabled
+        and GeoPandas is installed, the function automatically detects
+        GEOMETRY or GEOGRAPHY types and returns a geo-pandas GeoDataFrame
+        instead, with is geometry set to the first geo-spatial column.
 
-        if output:
-            self.shell.write(" results stored as '{}'\n".format(output))
-            self.shell.push({output: dta})
+        Usage:
+            %%pg_pd [output] [--idx [IDX] [IDX] ...]
+            [query]
+
+        Arguments:
+            [output] - name of variable where DataFrame will be stored
+            [IDX] - name of index column (warning: does not work if there are
+                    white spaces in the name). List multiple names in a white
+                    space separated list to create a multi-index. If '--idx' is
+                    used without specifying [IDX], the first column will be
+                    used by default.
+            [query] - SQL query to execute.
+        """
+        query, args = _line_cell_prep(line, cell)
+        args = args if args else ""
+        parser = argparse.ArgumentParser()
+        parser.add_argument('output', type=str, nargs='?')
+        parser.add_argument('--idx', type=str, nargs="+")
+        parser.add_argument('--gpd')
+        try:
+            ns = parser.parse_args(args.strip().split(" "))
+        except SystemExit:
+            return
+
+        dta, geocols = self._get_as_pandas(query, index=ns.idx)
+        if geocols and self.postgis_integration:
+            dta = self._to_gpd(dta, geocols[0])
+
+        if ns.output:
+            self.shell.write(" results stored as '{}'\n".format(ns.output))
+            self.shell.push({ns.output: dta})
             return
 
         return dta
+
+
+    def _to_gpd(self, dta, geocol=None):
+        try:
+            import geopandas as gpd
+        except ImportError:
+            self.shell.write(" warning: GeoPandas not installed; returning "
+                             " GIS results as ordinary pandas DataFrame.")
+            return dta
+
+        dta = gpd.GeoDataFrame(dta)
+        if geocol:
+            dta.set_geometry(geocol, inplace=True)
+        return dta
+
 
     @line_magic
     def pg_first(self, sql):
