@@ -44,6 +44,7 @@ SQL_SCHEMAS = ("select nspname as name, "
                "coalesce(pg_catalog.obj_description(oid), '(no description)')"
                " as schema_description "
                "from pg_catalog.pg_namespace "
+               "left join pg_catalog.pg_authid a on a.oid = nspowner "
                "where nspname !~ 'pg_(temp|toast|catalog).*' "
                "and nspname != 'information_schema'")
 
