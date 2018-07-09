@@ -239,21 +239,22 @@ class pgMagics(Magics):
         else:
             self.shell.write("SUCCES: matched {} rows\n".format(cur.rowcount))
 
+    def _python_tpl(self, sql):
+        def _adapt(v):
+            v = self.shell.ev(expr)
+            return str(psycopg2.extensions.adapt(v))
+
+        rxp = re.compile(r"(?<!\$)\${([^}]*)}")
+        txt = str(sql)
+        for expr in rxp.findall(sql):
+            txt = txt.replace("${%s}" % expr, _adapt(expr))
+        return txt
+
+
     def query(self, sql):
         """Query the database and perform variable substitution."""
         if "${" in sql:
-            sql = string.Template(sql)
-            lcs = get_ipython().ev("locals()")
-
-            def _adapt(v):
-                try:
-                    return psycopg2.extensions.adapt(v)
-                except Exception:
-                    return None
-
-            lcs = ((k, _adapt(v)) for k, v in lcs.items())
-            lcs = dict((k, v) for k, v in lcs if v is not None)
-            sql = sql.substitute(**lcs)
+            sql = self._python_tpl(sql)
 
         with self.catch_errors():
             cur = self.pg_cursor()
