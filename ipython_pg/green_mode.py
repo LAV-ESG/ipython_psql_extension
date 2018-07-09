@@ -51,3 +51,11 @@ def activate():
         psycopg2.extensions.set_wait_callback(callback)
     except AttributeError:
         raise NotImplementedError("only works with psycopg 2.2.0 or newer")
+
+def deactivate():
+    """Deactivate green-mode."""
+    try:
+        psycopg2.extensions.set_wait_callback(None)
+    except AttributeError:
+        raise NotImplementedError("only works with psycopg 2.2.0 or newer")
+

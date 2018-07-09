@@ -36,7 +36,9 @@ from IPython.core.magic import (Magics, line_magic, line_cell_magic,
 from IPython.display import HTML
 import psycopg2
 import psycopg2.extensions
+import psycopg2.sql
 import pandas as pd
+import io
 import argparse
 
 SQL_SCHEMAS = ("select nspname as name, "
@@ -543,6 +545,77 @@ class pgMagics(Magics):
 
         return self.display_cur_as_table(cur)
 
+    @line_magic
+    def pg_copy(self, line):
+        """Quickly copy data to postgres using native COPY.
+
+        Postgres' `COPY` is intended to move large chunks from and to a
+        database. The `on conflict` system of `insert` does not work, i.e. if
+        duplicate will beinserted despite primary keys or unique indices).
+        So be careful here as this could mess up your table.
+
+        Usage:
+            %pg_copy [source] [target]
+
+        Arguments:
+            [source] - any Python expression evaluating to a DataFrame
+            [target] - name of the target table (DO NOT quotes names!)
+        """
+        parser = argparse.ArgumentParser()
+        parser.add_argument('source', type=str,
+                            help="Python expression evaluating to a DataFrame")
+        parser.add_argument('target', type=str, help="Target table (no quotes)")
+        try:
+            ns = parser.parse_args(line.strip().split(" "))
+        except SystemExit:
+            return
+
+        dta = self.shell.ev(ns.source)
+        if not hasattr(dta, 'to_csv'):
+            raise NotImplementedError("currently only works with DataFrames")
+
+        from . import green_mode
+        _reactivate = self.green_mode
+        if _reactivate:
+            self.shell.write("  waring: green-mode temporarily deactivated ("
+                             "interrupt won't abort the import)")
+            green_mode.deactivate()
+        try:
+            with self.pg_cursor() as cur:
+                copy_pandas_dataframe(cur, dta, ns.target)
+            self.dbconn.commit()
+        except Exception as e:
+            self.dbconn.rollback()
+            raise e
+        finally:
+            if _reactivate:
+                green_mode.activate()
+                self.shell.write("  green mode reactivated")
+
+
+def copy_pandas_dataframe(cur, dta, target):
+    buff = io.StringIO()
+    index = True
+    columns = []
+    if dta.index.ndim == 1 and dta.index.names[0] is None:
+        # got no index -> skip index
+        index = False
+    else:
+        columns = list(dta.index.names)
+        index = True
+
+
+    dta.to_csv(buff, header=False, index=index)
+    buff.seek(0)
+    target = psycopg2.sql.SQL(".").join(psycopg2.sql.Identifier(t.strip())
+                                        for t in target.split("."))
+    columns = list(dta.columns) + columns
+    columns = psycopg2.sql.SQL(", ").join(psycopg2.sql.Identifier(c)
+                                          for c in columns)
+    sql = psycopg2.sql.SQL('COPY {} ({}) from stdin with (format csv);')
+    sql = sql.format(target, columns)
+    cur.copy_expert(sql, buff)
+    buff.close()
 
 def _line_cell_prep(line, cell=None):
     """Default logic for line-cell magis."""
