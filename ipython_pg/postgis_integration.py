@@ -102,6 +102,11 @@ def get_type_object(name):
     except StopIteration:
         raise KeyError(name)
 
+def geo_types():
+    for k, v in psycopg2.extensions.string_types.items():
+        if v.name in ("GEOGRAPHY", "GEOMETRY"):
+            yield k
+
 
 def register_shapely2postgis():
     """Register 'adapt_shapely' as an adapter."""
