@@ -28,7 +28,6 @@
 
 
 from contextlib import contextmanager
-import string
 import re
 import getpass
 from IPython.core.magic import (Magics, line_magic, line_cell_magic,
