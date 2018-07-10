@@ -40,17 +40,19 @@ import pandas as pd
 import io
 import argparse
 
-SQL_SCHEMAS = ("select nspname as name, "
-               "coalesce(pg_catalog.obj_description(oid), '(no description)')"
-               " as schema_description "
-               "from pg_catalog.pg_namespace "
-               "left join pg_catalog.pg_authid a on a.oid = nspowner "
-               "where nspname !~ 'pg_(temp|toast|catalog).*' "
-               "and nspname != 'information_schema'")
+SQL_SCHEMAS = ("select n.nspname as name, "
+               "coalesce(pg_catalog.obj_description(n.oid), "
+               "'(no description)') as schema_description, "
+               "s.schema_owner as owner "
+               "from pg_catalog.pg_namespace n "
+               "left join information_schema.schemata s "
+               "on s.schema_name = n.nspname "
+               "where n.nspname !~ 'pg_(temp|toast|catalog).*' "
+               "and n.nspname != 'information_schema'")
 
 SQL_TABLES = ("SELECT c.relname as table_name, "
               "coalesce(pg_catalog.obj_description(c.oid), '(no description)')"
-              " as table_description "
+              " as table_description, pg_get_userbyid(c.relowner) AS owner "
               "FROM pg_catalog.pg_class as c "
               "LEFT JOIN pg_namespace n ON n.oid = c.relnamespace "
               "WHERE n.nspname = '{}' and c.relkind in ('r', 'v')")
