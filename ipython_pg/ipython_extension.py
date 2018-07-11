@@ -566,7 +566,10 @@ class pgMagics(Magics):
         parser = argparse.ArgumentParser()
         parser.add_argument('source', type=str,
                             help="Python expression evaluating to a DataFrame")
-        parser.add_argument('target', type=str, help="Target table (no quotes)")
+        parser.add_argument('target', type=str, help="Target table")
+        parser.add_argument('--chunksize', type=int,
+                            help=("number of lines to copy at once (their "
+                                  "CSV representation needs to fit in memory"))
         try:
             ns = parser.parse_args(line.strip().split(" "))
         except SystemExit:
@@ -595,8 +598,8 @@ class pgMagics(Magics):
                 self.shell.write("  green mode reactivated")
 
 
-def copy_pandas_dataframe(cur, dta, target):
-    buff = io.StringIO()
+def copy_pandas_dataframe(cur, dta, target, chunk=10000):
+    # determine whether we need an index
     index = True
     columns = []
     if dta.index.ndim == 1 and dta.index.names[0] is None:
@@ -606,9 +609,8 @@ def copy_pandas_dataframe(cur, dta, target):
         columns = list(dta.index.names)
         index = True
 
-
-    dta.to_csv(buff, header=False, index=index)
-    buff.seek(0)
+    # generate copy to command
+    target.replace('"', '')
     target = psycopg2.sql.SQL(".").join(psycopg2.sql.Identifier(t.strip())
                                         for t in target.split("."))
     columns = list(dta.columns) + columns
@@ -616,8 +618,16 @@ def copy_pandas_dataframe(cur, dta, target):
                                           for c in columns)
     sql = psycopg2.sql.SQL('COPY {} ({}) from stdin with (format csv);')
     sql = sql.format(target, columns)
-    cur.copy_expert(sql, buff)
-    buff.close()
+
+    # write chunk by chunk (to manage memory storage)
+    n = len(dta)
+    for i in range(0, n, chunk):
+        j = min(i + chunk, n)
+        buff = io.StringIO()
+        dta.iloc[i:j].to_csv(buff, header=False, index=index)
+        buff.seek(0)
+        cur.copy_expert(sql, buff)
+        buff.close()
 
 def _line_cell_prep(line, cell=None):
     """Default logic for line-cell magis."""
