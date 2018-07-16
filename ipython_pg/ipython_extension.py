@@ -247,26 +247,56 @@ class pgMagics(Magics):
             self.shell.write("SUCCES: matched {} rows\n".format(cur.rowcount))
 
     def _python_tpl(self, sql):
-        def _adapt(v):
-            v = self.shell.ev(expr)
-            return str(psycopg2.extensions.adapt(v))
-
-        rxp = re.compile(r"(?<!\$)\${([^}]*)}")
+        rxp = re.compile(r"(?<!\$)\${([^}:]*)(?::([si]))?}")
         txt = str(sql)
-        for expr in rxp.findall(sql):
-            txt = txt.replace("${%s}" % expr, _adapt(expr))
-        return txt
+        q_args = []
+        f_args = []
 
+        for expr, fmt in rxp.findall(txt):
+            ev = self.shell.ev(expr)
+            if fmt:  # if fmt specified, use f-string
+                rep = "{}"
+                if fmt == "s":
+                    ev = psycopg2.sql.Literal(ev)
+                elif fmt == "i":
+                    if hasattr(ev, 'split'):  # split qualified names
+                        ev = ev.split(".")
+                    ev = (psycopg2.sql.Identifier(e) for e in ev)
+                    ev = psycopg2.sql.SQL(".").join(ev)
+                f_args.append(ev)
+            else:  # no fmt, treat as query argument
+                rep = "%s"
+                q_args.append(ev)
+            expr = ":".join([expr, fmt]) if fmt else expr
+            txt = txt.replace("${%s}" % expr, rep)
 
-    def query(self, sql):
-        """Query the database and perform variable substitution."""
+        txt = psycopg2.sql.SQL(txt).format(*f_args)
+        return txt, q_args
+
+    def query(self, sql, silent=False, propagate=False):
+        """Query the database and perform variable substitution.
+
+        Arguments:
+            sql {str or SQL} -- SQL command to execute.
+            silent {bool} -- if True, only print error messages.
+            propagate {bool} -- if True, reraise database errors.
+        """
+        args = []
+        sql = (sql.as_string(self.dbconn) if hasattr(sql, 'as_string')
+               else str(sql))
         if "${" in sql:
-            sql = self._python_tpl(sql)
+            sql, args = self._python_tpl(sql)
 
-        with self.catch_errors():
+        try:
             cur = self.pg_cursor()
-            cur.execute(sql)
-            self.cur_report(cur)
+            cur.execute(sql, args)
+            if not silent:
+                self.cur_report(cur)
+        except psycopg2.Error as e:
+            self.shell.write_err("ERROR: {}\n".format(str(e)))
+            self.dbconn.rollback()
+            if propagate:
+                raise e
         return cur
 
 
