@@ -349,21 +349,6 @@ class pgMagics(Magics):
 
         return self.display_cur_as_table(cur)
 
-
-    def _get_as_pandas(self, query, index=None):
-        cur = self.query(query)
-        dta = pd.DataFrame([r for r in cur],
-                           columns=[c.name for c in cur.description])
-        geocols = [c.name for c in cur.description
-                   if c.type_code in self._geo_types]
-        cur.close()
-
-        if index:
-            dta.set_index(index, inplace=True)
-
-        return dta, geocols
-
-
     @line_cell_magic
     def pg_pd(self, line, cell=None):
         """Query the database.
@@ -398,9 +383,8 @@ class pgMagics(Magics):
         except SystemExit:
             return
 
-        dta, geocols = self._get_as_pandas(query, index=ns.idx)
-        if geocols and self.postgis_integration:
-            dta = self._to_gpd(dta, geocols[0])
+        cur = self.query(query)
+        dta = self._as_pandas_dataframe(cur, index=ns.idx)
 
         if ns.output:
             self.shell.write(" results stored as '{}'\n".format(ns.output))
@@ -409,18 +393,29 @@ class pgMagics(Magics):
 
         return dta
 
+    def _as_pandas_dataframe(self, cur, index=None):
+        if not cur:
+            return pd.DataFrame([])
+        dta = pd.DataFrame([r for r in cur],
+                           columns=[c.name for c in cur.description])
+        geocols = [c.name for c in cur.description
+                   if c.type_code in self._geo_types]
 
-    def _to_gpd(self, dta, geocol=None):
+        if index:
+            dta.set_index(index, inplace=True)
+
+        if not geocols:
+            return dta
+
         try:
             import geopandas as gpd
         except ImportError:
             self.shell.write(" warning: GeoPandas not installed; returning "
-                             " GIS results as ordinary pandas DataFrame.")
+                             " GIS objects in ordinary pandas DataFrame.")
             return dta
 
         dta = gpd.GeoDataFrame(dta)
-        if geocol:
-            dta.set_geometry(geocol, inplace=True)
+        dta.set_geometry(geocols[0], inplace=True)
         return dta
 
 
