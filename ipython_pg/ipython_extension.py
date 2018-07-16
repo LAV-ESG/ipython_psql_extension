@@ -31,7 +31,7 @@ from contextlib import contextmanager
 import re
 import getpass
 from IPython.core.magic import (Magics, line_magic, line_cell_magic,
-                                magics_class)
+                                cell_magic, magics_class)
 from IPython.display import HTML
 import psycopg2
 import psycopg2.extensions
@@ -107,6 +107,7 @@ class pgMagics(Magics):
         self.postgis_integration = not bool(disable_postgis_integration)
         self.green_mode = not bool(disable_green_mode)
         self._geo_types = []
+        self._preped_stmts = []
 
     @line_magic
     def pg_connect(self, arg):
@@ -622,6 +623,78 @@ class pgMagics(Magics):
                 green_mode.activate()
                 self.shell.write("  green mode reactivated")
 
+    @cell_magic
+    def pg_prepare(self, line, cell=None):
+        """Execute query as prepared statement.
+
+        Executes the query in the cell as a prepared statement and makes it
+        available as a function of the same name. The function must be called
+        with as many arguments as were specified in the query (using $<x>
+        notation).
+
+        Usage:
+            %%pg_prepare <name> [--idx [IDX] ...]
+
+        Arguments:
+            <name> -- name of the prepared statement (and callback)
+            [IDX] -- field to use as index; if specified, the as_dataframe
+                     option is automatically implied.
+        """
+        parser = argparse.ArgumentParser()
+        parser.add_argument('name', type=str, nargs='?')
+        parser.add_argument('--idx', type=str, nargs="+")
+
+        try:
+            ns = parser.parse_args(line.strip().split(" "))
+        except SystemExit:
+            return
+
+        name = psycopg2.sql.Identifier(ns.name)
+
+        # send deallocate first if redefined
+        if ns.name in self._preped_stmts:
+            self._preped_stmts.remove(ns.name)
+            cur = self.query(psycopg2.sql.SQL("deallocate {}").format(name),
+                             silent=True, propagate=True)
+
+        sql = psycopg2.sql.SQL(cell)
+        sql = psycopg2.sql.SQL("prepare {} as {}").format(name, sql)
+        cur = self.query(sql, silent=True, propagate=True)
+        cur.close()
+
+        # only append if the query was successful
+        if ns.name not in self._preped_stmts:
+            self._preped_stmts.append(ns.name)
+
+        # find number of arguments (assuming $x notation)
+        n_args = max([int(s) for s in re.findall("\$([1-9][0-9]*)", cell)])
+
+        # compose execute statement, including placeholders
+        sql = [psycopg2.sql.Placeholder()] * n_args
+        sql = psycopg2.sql.SQL(", ").join(sql)
+        sql = psycopg2.sql.SQL("execute {} ({})").format(name, sql)
+        sql = sql.as_string(self.dbconn)
+
+        err_msg = "Prepared statement callback '{}' ".format(ns.name)
+        err_msg += "expects {} arguments, ".format(n_args)
+        err_msg += "but got {}."
+
+        def callback(*args, df=False, as_dataframe=False):
+            if len(args) != n_args:
+                raise ValueError(err_msg.format(len(args)))
+            try:
+                cur = self.pg_cursor()
+                cur.execute(sql, args)
+            except psycopg2.Error as e:
+                self.dbconn.rollback()
+                raise e
+
+            if df or as_dataframe:
+                return self._as_pandas_dataframe(cur, index=ns.idx)
+            return cur
+
+        self.shell.write(" prepared-statement at '{}'\n".format(ns.name))
+        self.shell.push({ns.name: callback})
 
 def copy_pandas_dataframe(cur, dta, target, chunk=10000):
     # determine whether we need an index
