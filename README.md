@@ -14,23 +14,45 @@ Next to IPython "magics" targeting ease of use, the package also includes:
 We showcase the extension's features in the [demo notebook](https://github.com/LAV-ESG/ipython_psql_extension/blob/master/IPYpsqglDemo.ipynb).
 
 ## Installation
-0. Make sure you have: *IPython*, *Pandas* and *psycopg2* installed. The *PostGIS* integration requires *Shapely*. For this installation instructions to work, you need *pip* installed (use ``python -m pip`` instead of ``pip`` if it's not on the system path).
-1. Download the ``.whl`` file of the [latest release](https://github.com/LAV-ESG/ipython_psql_extension/releases/latest)
-2. In a console, change to where you downloaded the file and
-3. Run:``pip install [name of the file]``
 
-## Installing ``psycopg2``
-We recommend using [Anaconda](https://www.continuum.io/downloads) over the legacy CPython binaries from [Python.org](https://python.org), because ``Anaconda`` already ships with most packages you will need for serious data-processing (including *Pandas* and *IPython*). However, at least on Windows, ``Anaconda`` does not ship with ``psycopg2``. We recommend to ``conda install``the binary from ``conda-forge`` (as it has no issues with SSL support on MacOS, and, on Windows, ``psycopg2`` is actually not on the default channel).
-
-To install ``psycopg2`` run:
+If you use [Anaconda](https://www.continuum.io/downloads) or [Miniconda](https://docs.conda.io/en/latest/miniconda.html), you can install our module straight from our channel:
 ```bash
-conda install -c conda-forge psycopg2
+conda install -c lav-esg ipython_pg
 ```
 
-If this does not work, or if you are using legacy CPython, a convenient alternative is to download and ``pip install`` the matching [precompiled wheel](http://www.lfd.uci.edu/~gohlke/pythonlibs/#psycopg) from Christoph Gohlke's homepage (be sure to choose the ``.whl``-File matching your Python interpreter, e.g. "``-cp35-cp35m-win_amd64.whl``" for the Python 3.5, 64-bit version).
+### Note: installing *Shapely*
+**Note**: *Shapely* is an optional dependency, meaning it is not installed when you install *ipython_pg*. `ipython_pg` can transparently cast *PostGIS* datatypes to *Shapely* and back.
+However this only works if (a) you are connected to a database with *PostGIS* enabled and (b) you have *Shapely* installed.
+`ipython_pg` still works without *Shapely*, but all GIS features will be disabled.
 
-## Note: 'sslcert' on MacOSX
-On MacOSX, using the 'sslcert' argument in ``%pg_connect`` can cause trouble, as the system seems to expect a separate private key file:
+To install *Shapely*:
+```bash
+conda install shapely
+```
+
+On many platforms, this will fail. Then use `conda-forge` channel: 
+```bash
+conda install -c conda-forge shapely
+```
+
+### Installation using `pip` wheels
+If you are not using `Anaconda` or `Miniconda`:
+0. Make sure you have: *IPython*, *Pandas*, *psycopg2* and optionally *Shapely* installed (see note above). 
+1. Download the ``.whl`` file of the [latest release](https://github.com/LAV-ESG/ipython_psql_extension/releases/latest)
+2. In a console, change to where you downloaded the file
+3. Run:``pip install [name of the file]``
+
+If you run into trouble installing `psycopg2`, on Windows you can download and ``pip install`` the matching [precompiled wheel](http://www.lfd.uci.edu/~gohlke/pythonlibs/#psycopg) from Christoph Gohlke's homepage (be sure to choose the ``.whl``-File matching your Python interpreter and platform, e.g. "``-cp35-win_amd64.whl``" for Python 3.5 on 64-bit Windows).
+
+## Troubleshooting: known issues & workarounds
+
+### Unable to get SSL context
+While we never figured out why, some version of `psycopg2` seemed to have compatibility issues with other binaries of the Python standard library.
+This would result in cryptic error messages, suggestint SSL issues.
+In all instances, the solution was reinstalling Anaconda.
+
+### "Got certificate present, but not private key file" on MacOS
+On MacOS, the 'sslcert' argument in ``%pg_connect`` is apparently not always set correctly. It seems as if the system would expect a separate private key file:
 ```
 ERROR: unable to connect! Got certificate present, but not private key file "/Users/<username>/.postgresql/postgresql.key"
 FATAL:  no pg_hba.conf entry for host "<hostname>", user "<username>", database "<database>", SSL off
@@ -40,3 +62,10 @@ The simplest work-around is to install the certificate locally (just double-clic
 ```Python
 %pg_connect sslcert=""
 ```
+
+## Tips & tricks
+
+### pgpass
+On all platforms, `libpq`, the backend library to the PostgreSQL client, supports a [password file](https://www.postgresql.org/docs/current/libpq-pgpass.html).
+Essentially, you type your credentials in a special file, so you do not have to retype your password everytime you connect.
+Only do this if your machine is physically secure (i.e. do not do this on mobile devices) and properly shield the file from other users (see [Documentation](https://www.postgresql.org/docs/current/libpq-pgpass.html))
