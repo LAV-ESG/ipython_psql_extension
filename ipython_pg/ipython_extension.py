@@ -604,6 +604,9 @@ class pgMagics(Magics):
         dta = self.shell.ev(ns.source)
         if not hasattr(dta, 'to_csv'):
             raise NotImplementedError("currently only works with DataFrames")
+        if isinstance(dta.index, pd.MultiIndex):
+            raise ValueError('cannot `%pg_copy` a DataFrame with a MultiIndex. '
+                             'Use `reset_index` to flatten the index.')
 
         from . import green_mode
         _reactivate = self.green_mode
